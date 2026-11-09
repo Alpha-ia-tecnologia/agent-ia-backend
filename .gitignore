@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+coverage/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# runtime (sessões WhatsApp, uploads)
+data/
+whatsapp-bridge/node_modules/
+uploads/

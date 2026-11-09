@@ -1,0 +1,894 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OnboardingStatus {
+  PENDING
+  GENERATED
+  COMPLETED
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Provider {
+  OPENAI
+  ANTHROPIC
+  DEEPSEEK
+  GOOGLE
+  OPENROUTER
+  CUSTOM
+}
+
+enum MessageSender {
+  USER
+  AGENT
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+}
+
+enum ConversationVisibility {
+  PRIVATE // só o dono (e admins em modo leitura)
+  COMPANY // toda a empresa
+  USERS // usuários específicos (ConversationParticipant)
+}
+
+enum ShareRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+enum HttpMethod {
+  GET
+  POST
+  PUT
+  PATCH
+  DELETE
+}
+
+enum AgentSandbox {
+  WORKSPACE // agentes atuam só no workspace do tenant (padrão)
+  CUSTOM // agentes atuam na pasta definida em sandboxPath
+  FREE // agentes livres (terminal e sistema de arquivos do host)
+}
+
+model Company {
+  id                   String           @id @default(cuid())
+  name                 String
+  businessDescription  String?
+  industry             String?
+  agentSandbox         AgentSandbox     @default(WORKSPACE)
+  sandboxPath          String?
+  // Login por assinatura (BYOA): quando definido, tem precedência sobre
+  // as chaves de API. Tokens ficam no HERMES_HOME do tenant (bridge).
+  subscriptionProvider String? // openai-codex | anthropic-oauth | copilot | nous | xai-oauth
+  subscriptionModel    String?
+  // Busca inteligente (RAG vetorial): chave BYOK + modelo de embeddings
+  embeddingKeyId       String?
+  embeddingKey         ProviderKey?     @relation("CompanyEmbeddingKey", fields: [embeddingKeyId], references: [id], onDelete: SetNull)
+  embeddingModel       String?
+  onboardingStatus     OnboardingStatus @default(PENDING)
+  onboardingDraft      Json?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  users              User[] // legado: vínculo real em memberships
+  memberships        Membership[]
+  invites            OrgInvite[]
+  departments        Department[]
+  agents             Agent[]
+  providerKeys       ProviderKey[]
+  conversations      Conversation[]
+  customTools        CustomTool[]
+  knowledgeDocs      KnowledgeDocument[]
+  connectors         Connector[]
+  projects           Project[]
+  taskLists          TaskList[]
+  tasks              Task[]
+  datasets           Dataset[]
+  channels           Channel[]
+  meetingSessions    MeetingSession[]
+  meetingBotAccounts MeetingBotAccount[]
+  trailEvent         TrailEvent?
+  trailRuns          TrailRun[]
+}
+
+/// O que o organizador liberou para todas as salas na trilha.
+model TrailEvent {
+  companyId    String   @id
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  releasedUpTo Int      @default(0)
+  /// entrada só com o nome: no máximo uma organização aberta por vez
+  entryOpen    Boolean  @default(false)
+  /// o organizador abriu a escolha do piloto para todas as mesas
+  pilotOpen    Boolean  @default(false)
+  /// votação final entre os pilotos das mesas
+  voteOpen     Boolean  @default(false)
+  /// o organizador abriu a Chegada para quem ainda não concluiu as estações
+  chegadaOpen  Boolean  @default(false)
+  updatedAt    DateTime @updatedAt
+}
+
+model TrailRun {
+  id           String   @id @default(cuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  number       Int
+  name         String
+  /// lugares ocupados; reservados atomicamente em TrailService.assignRoom
+  memberCount  Int      @default(0)
+  releasedUpTo Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  members     TrailMember[]
+  results     TrailResult[]
+  sessions    TrailSession[]
+  notes       TrailNote[]
+  pilot       TrailPilot?
+  publicVotes TrailPublicVote[]
+  plans       TrailPlan[]
+
+  @@unique([companyId, number])
+}
+
+model TrailMember {
+  id         String   @id @default(cuid())
+  runId      String
+  run        TrailRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId  String
+  /// secretaria ou órgão informado na Largada
+  department String?
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, companyId])
+  @@index([runId])
+}
+
+/// Medalha da mesa: a linha existe quando metade da mesa concluiu a estação.
+model TrailResult {
+  id         String   @id @default(cuid())
+  runId      String
+  run        TrailRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  station    Int
+  approvedAt DateTime @default(now())
+
+  @@unique([runId, station])
+}
+
+/// Conversa de uma pessoa com o Guia em uma estação (0 é a Largada).
+model TrailSession {
+  id          String    @id @default(cuid())
+  runId       String
+  run         TrailRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  station     Int
+  stepIndex   Int       @default(0)
+  /// answer, attach, prompt ou done
+  phase       String    @default("answer")
+  attempts    Int       @default(0)
+  documentId  String?
+  /// respostas sugeridas para a última pergunta
+  options     Json      @default("[]")
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  messages TrailMessage[]
+
+  @@unique([runId, userId, station])
+  @@index([runId, station])
+}
+
+model TrailMessage {
+  id         String       @id @default(cuid())
+  sessionId  String
+  session    TrailSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role       String
+  authorName String?
+  content    String
+  createdAt  DateTime     @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+/// O que cada pessoa concluiu em cada passo: alimenta o mural e a Ficha do Piloto.
+model TrailNote {
+  id         String   @id @default(cuid())
+  runId      String
+  run        TrailRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  station    Int
+  userId     String
+  authorName String
+  department String?
+  step       String
+  text       String
+  createdAt  DateTime @default(now())
+
+  @@unique([runId, userId, station, step])
+  @@index([runId, station, createdAt])
+}
+
+/// Piloto da mesa: ideias consolidadas, escolha e Ficha do Piloto.
+model TrailPilot {
+  runId      String   @id
+  run        TrailRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// generating, voting, drafting ou ready
+  status     String   @default("generating")
+  candidates Json     @default("[]")
+  chosen     Int?
+  sheet      Json     @default("{}")
+  updatedAt  DateTime @updatedAt
+
+  votes TrailPilotVote[]
+}
+
+/// Plano de ação de 90 dias de cada pessoa, montado na Chegada.
+model TrailPlan {
+  id        String   @id @default(cuid())
+  runId     String
+  run       TrailRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// generating, ready ou failed
+  status    String   @default("generating")
+  content   Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([runId, userId])
+  @@index([runId])
+}
+
+model TrailPilotVote {
+  id      String     @id @default(cuid())
+  runId   String
+  pilot   TrailPilot @relation(fields: [runId], references: [runId], onDelete: Cascade)
+  userId  String
+  station Int
+
+  @@unique([runId, userId])
+}
+
+/// Votação final: cada pessoa vota em um piloto de outra mesa.
+model TrailPublicVote {
+  id        String   @id @default(cuid())
+  companyId String
+  userId    String
+  runId     String
+  run       TrailRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([runId])
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  // Legado (antes das organizações): companyId agora = última organização
+  // ativa (usada no login); role não é mais lido. Vínculo real: memberships.
+  role         UserRole?
+  companyId    String?
+  company      Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  memberships                Membership[]
+  invitesCreated             OrgInvite[]
+  agentAccess                UserAgentAccess[]
+  conversations              Conversation[]
+  projectsCreated            Project[]
+  taskMemberships            TaskMember[]
+  messages                   Message[]
+  conversationParticipations ConversationParticipant[]
+  shareRequests              ConversationShareRequest[]
+  trailMemberships           TrailMember[]
+  trailSessions              TrailSession[]
+  trailPlans                 TrailPlan[]
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  agents      Agent[]
+  users       User[]
+  memberships Membership[]
+  projects    ProjectDepartment[]
+}
+
+/// Vínculo usuário ↔ organização (como no GitHub): uma pessoa, várias orgs.
+/// Exatamente um OWNER por organização (garantido na aplicação).
+model Membership {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role          UserRole    @default(MEMBER)
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  // Acesso de MEMBER aos agentes (OWNER/ADMIN veem todos):
+  //  allAgents: todos os agentes da org, inclusive os criados depois;
+  //  senão o Gerente (se managerAccess) + os liberados em UserAgentAccess.
+  allAgents     Boolean     @default(false)
+  managerAccess Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+
+  @@unique([userId, companyId])
+  @@index([companyId])
+}
+
+/// Convite para entrar numa organização: o mesmo código vira link, QR e
+/// código digitado. Revogável, com validade e limite de usos opcionais.
+model OrgInvite {
+  id          String    @id @default(cuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  code        String    @unique
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  expiresAt   DateTime?
+  maxUses     Int?
+  uses        Int       @default(0)
+  revokedAt   DateTime?
+  // Acesso que quem entra por este convite recebe: todos os agentes, ou só os
+  // de agentIds (sem o Gerente, a menos que ele esteja na lista).
+  allAgents   Boolean   @default(true)
+  agentIds    String[]  @default([])
+  createdAt   DateTime  @default(now())
+
+  @@index([companyId])
+}
+
+model Agent {
+  id           String      @id @default(cuid())
+  name         String
+  slug         String
+  avatarSeed   String
+  role         String?
+  description  String?
+  systemPrompt String      @default("")
+  isManager    Boolean     @default(false)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  companyId    String
+  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  capabilities Json        @default("{}")
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  userAccess      UserAgentAccess[]
+  messages        Message[]
+  agentTools      AgentTool[]
+  knowledgeDocs   KnowledgeDocument[]
+  taskMemberships TaskMember[]
+
+  @@unique([companyId, slug])
+}
+
+model UserAgentAccess {
+  id      String @id @default(cuid())
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentId String
+  agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, agentId])
+}
+
+model ProviderKey {
+  id               String   @id @default(cuid())
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  provider         Provider
+  encryptedKey     String
+  iv               String
+  authTag          String
+  baseUrl          String?
+  defaultModel     String?
+  label            String
+  // 0 = fora do fallback; 1..n = ordem de reserva quando o principal falha
+  fallbackPriority Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  embeddingCompanies Company[] @relation("CompanyEmbeddingKey")
+}
+
+model Conversation {
+  id         String                 @id @default(cuid())
+  companyId  String
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String                 @default("Nova conversa")
+  pinned     Boolean                @default(false)
+  visibility ConversationVisibility @default(PRIVATE)
+  metadata   Json?
+  projectId  String? // conversa no contexto de um projeto
+  project    Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  messages      Message[]
+  events        OrchestrationEvent[]
+  participants  ConversationParticipant[]
+  shareRequests ConversationShareRequest[]
+
+  @@index([projectId])
+  @@index([companyId, userId])
+}
+
+model Message {
+  id             String        @id @default(cuid())
+  conversationId String
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         MessageSender
+  agentId        String?
+  agent          Agent?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  userId         String? // autor humano da mensagem (útil em conversas compartilhadas)
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type           MessageType   @default(TEXT)
+  content        String
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model ConversationShareRequest {
+  id             String             @id @default(cuid())
+  conversationId String
+  conversation   Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  requesterId    String
+  requester      User               @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+  status         ShareRequestStatus @default(PENDING)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([conversationId, requesterId])
+  @@index([requesterId])
+}
+
+model OrchestrationEvent {
+  id             String        @id @default(cuid())
+  companyId      String? // para o painel de auditoria (backfill via conversa)
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agentId        String?
+  type           String
+  payload        Json
+  createdAt      DateTime      @default(now())
+
+  @@index([companyId, createdAt])
+}
+
+enum DatasetColumnType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  CURRENCY
+}
+
+enum DatasetQuality {
+  OK
+  WITH_ISSUES
+}
+
+model Channel {
+  id             String           @id @default(cuid())
+  companyId      String
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type           String // TELEGRAM (futuro: WHATSAPP, EMAIL)
+  name           String
+  agentId        String? // agente atendente; null = Agente Gerente
+  isActive       Boolean          @default(true)
+  autoRespond    Boolean          @default(true) // agente responde sozinho?
+  encryptedToken String
+  iv             String
+  authTag        String
+  config         Json             @default("{}")
+  createdAt      DateTime         @default(now())
+  // soft delete: remover o canal preserva o histórico (contatos/mensagens) no
+  // inbox; o canal só some da lista de conectados e para de receber.
+  removedAt      DateTime?
+  contacts       ChannelContact[]
+
+  @@index([companyId])
+}
+
+model ChannelContact {
+  id             String           @id @default(cuid())
+  channelId      String
+  channel        Channel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  externalId     String // chat_id do Telegram / e-mail do remetente
+  name           String           @default("")
+  conversationId String           @unique
+  metadata       Json             @default("{}") // e-mail: lastMessageId, subject
+  unreadCount    Int              @default(0)
+  lastMessageAt  DateTime?
+  createdAt      DateTime         @default(now())
+  messages       ChannelMessage[]
+
+  @@unique([channelId, externalId])
+}
+
+model ChannelMessage {
+  id        String         @id @default(cuid())
+  contactId String
+  contact   ChannelContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  direction String // IN (cliente) | OUT (agente/humano)
+  author    String         @default("") // OUT: nome do agente ou do usuário
+  content   String
+  createdAt DateTime       @default(now())
+
+  @@index([contactId, createdAt])
+}
+
+model Dataset {
+  id           String          @id @default(cuid())
+  companyId    String
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  description  String          @default("")
+  sourceType   String          @default("UPLOAD") // UPLOAD | CONNECTOR
+  fileName     String?
+  rowCount     Int             @default(0)
+  quality      DatasetQuality  @default(OK)
+  qualityNotes Json            @default("[]") // avisos da importação
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  columns      DatasetColumn[]
+  rows         DatasetRow[]
+
+  @@index([companyId])
+}
+
+model DatasetColumn {
+  id          String            @id @default(cuid())
+  datasetId   String
+  dataset     Dataset           @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  name        String
+  type        DatasetColumnType @default(TEXT)
+  description String            @default("")
+  position    Int
+
+  @@unique([datasetId, name])
+  @@index([datasetId])
+}
+
+model DatasetRow {
+  id        String  @id @default(cuid())
+  datasetId String
+  dataset   Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  rowIndex  Int
+  data      Json
+
+  @@index([datasetId, rowIndex])
+}
+
+model TokenUsage {
+  id               String   @id @default(cuid())
+  companyId        String
+  conversationId   String?
+  agentId          String?
+  userId           String?
+  model            String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, agentId])
+  @@index([companyId, userId])
+}
+
+model CustomTool {
+  id               String     @id @default(cuid())
+  companyId        String
+  company          Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name             String
+  displayName      String
+  description      String
+  method           HttpMethod
+  url              String
+  encryptedHeaders String?
+  headersIv        String?
+  headersAuthTag   String?
+  paramsSchema     Json
+  timeoutMs        Int        @default(15000)
+  isActive         Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+
+  agentTools AgentTool[]
+
+  @@unique([companyId, name])
+}
+
+model AgentTool {
+  id      String     @id @default(cuid())
+  agentId String
+  agent   Agent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  toolId  String
+  tool    CustomTool @relation(fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, toolId])
+}
+
+// ---- Projetos & Tasks (kanban) ------------------------------------------
+
+enum ProjectStatus {
+  AGUARDANDO_INICIO
+  EM_ANDAMENTO
+  FINALIZADO // reabertura permitida: FINALIZADO -> EM_ANDAMENTO
+}
+
+enum ProjectAnalysisStatus {
+  IDLE
+  RUNNING
+  DONE
+  ERROR
+}
+
+enum TaskStatus {
+  A_FAZER
+  EM_ANDAMENTO
+  EM_REVISAO
+  CONCLUIDA
+}
+
+enum TaskPriority {
+  BAIXA
+  MEDIA
+  ALTA
+  URGENTE
+}
+
+model Project {
+  id             String                @id @default(cuid())
+  companyId      String
+  company        Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  status         ProjectStatus         @default(AGUARDANDO_INICIO)
+  allDepartments Boolean               @default(false)
+  requirements   String? // markdown gerado pela análise IA
+  analysisStatus ProjectAnalysisStatus @default(IDLE)
+  analysisError  String?
+  createdById    String?
+  createdBy      User?                 @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  departments   ProjectDepartment[]
+  taskLists     TaskList[]
+  tasks         Task[]
+  conversations Conversation[]
+  documents     KnowledgeDocument[]
+
+  @@index([companyId])
+}
+
+model ProjectDepartment {
+  id           String     @id @default(cuid())
+  projectId    String
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, departmentId])
+}
+
+model TaskList {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId String? // null = lista isolada (sem projeto)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  tasks Task[]
+
+  @@index([companyId])
+  @@index([projectId])
+}
+
+model Task {
+  id             String       @id @default(cuid())
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId      String? // null = task isolada
+  project        Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  listId         String?
+  list           TaskList?    @relation(fields: [listId], references: [id], onDelete: SetNull)
+  title          String
+  description    String?
+  status         TaskStatus   @default(A_FAZER)
+  priority       TaskPriority @default(MEDIA)
+  dueDate        DateTime?
+  position       Int          @default(0) // ordem dentro da coluna do kanban
+  createdByAgent Boolean      @default(false) // auditoria: criada por agente via tool
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  members TaskMember[]
+
+  @@index([companyId, status])
+  @@index([projectId])
+  @@index([listId])
+}
+
+// Responsável polimórfico: exatamente um de userId/agentId (CHECK na migration)
+model TaskMember {
+  id      String  @id @default(cuid())
+  taskId  String
+  task    Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId  String?
+  user    User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentId String?
+  agent   Agent?  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@unique([taskId, agentId])
+  @@index([taskId])
+}
+
+// Conector local: app na máquina do cliente que expõe pastas via túnel WS.
+// Status online/offline é derivado do registry em memória, não é coluna.
+model Connector {
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name       String
+  tokenHash  String    @unique // sha256 hex do token (exibido só na criação)
+  lastSeenAt DateTime?
+  folders    Json      @default("[]") // [{ path, readOnly }] reportado pelo CLI
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([companyId])
+}
+
+enum KnowledgeStatus {
+  PROCESSING
+  READY
+  ERROR
+}
+
+model KnowledgeDocument {
+  id            String          @id @default(cuid())
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  agentId       String? // null = conhecimento de toda a empresa
+  agent         Agent?          @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  title         String
+  objectName    String
+  mimeType      String
+  status        KnowledgeStatus @default(PROCESSING)
+  error         String?
+  chunkCount    Int             @default(0)
+  embeddedCount Int             @default(0)
+  projectId     String? // documento descritivo de um projeto
+  project       Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt     DateTime        @default(now())
+
+  chunks KnowledgeChunk[]
+
+  @@index([companyId])
+  @@index([projectId])
+}
+
+model KnowledgeChunk {
+  id             String                   @id @default(cuid())
+  documentId     String
+  document       KnowledgeDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  companyId      String
+  index          Int
+  content        String
+  // tsv é mantida por trigger (migração SQL manual); declarar aqui evita que
+  // o Prisma a droppe por drift, como aconteceu na 20260706193325
+  tsv            Unsupported("tsvector")?
+  embedding      Unsupported("vector")?
+  embeddingModel String?
+
+  @@index([companyId])
+  @@index([tsv], type: Gin)
+}
+
+// Uma reunião que o bot (aao-scribe) entra por link, grava e transcreve. A
+// reunião vira uma Conversation no inbox (conversationId) e é processada pelo
+// agente do canal para gerar as entregas (resumo, ata, action items, etc.).
+// Substitui o antigo caminho nativo do Microsoft Graph: o gatilho agora é o
+// link colado pelo usuário, e a captura é feita pelo bot Playwright.
+model MeetingSession {
+  id             String    @id @default(cuid())
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  channelId      String
+  platform       String    @default("TEAMS") // TEAMS | MEET
+  joinUrl        String
+  subject        String    @default("")
+  // Join agendado; null = entrar assim que enfileirado.
+  scheduledAt    DateTime?
+  // PENDING | JOINING | LOBBY | RECORDING | LEFT | TRANSCRIBING | PROCESSING | DONE | FAILED
+  status         String    @default("PENDING")
+  botWorkerId    String? // qual worker do aao-scribe pegou o job
+  startedAt      DateTime? // início real da gravação
+  durationSec    Int?
+  recordingKey   String? // objeto de áudio/AV no MinIO
+  transcriptKey  String? // transcrição bruta no MinIO
+  // [{ ts, kind: decision|action|topic, text, speaker }] — momentos clicáveis.
+  highlights     Json?
+  conversationId String?
+  error          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([companyId, status])
+  @@index([scheduledAt])
+}
+
+/**
+ * Conta que o bot (aao-scribe) usa para entrar LOGADO nas reuniões — uma por
+ * empresa e por provedor. O Google/Microsoft bloqueiam join anônimo/automatizado,
+ * então cada escritório conecta a própria conta. Guardamos o storageState do
+ * Playwright (cookies/sessão) cifrado com CryptoService (AES-256-GCM), no mesmo
+ * padrão de ProviderKey/Channel. Soft delete (regra nunca-excluir).
+ */
+model MeetingBotAccount {
+  id              String    @id @default(cuid())
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  provider        String // GOOGLE | MICROSOFT
+  email           String? // e-mail da conta conectada (só exibição)
+  encryptedState  String // storageState do Playwright, cifrado
+  iv              String
+  authTag         String
+  status          String    @default("CONNECTED") // CONNECTED | EXPIRED | DISCONNECTED
+  lastValidatedAt DateTime?
+  lastError       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  removedAt       DateTime? // soft delete
+
+  @@index([companyId, provider, status])
+}

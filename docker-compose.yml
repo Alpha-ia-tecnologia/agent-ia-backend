@@ -1,0 +1,65 @@
+# aao-api — deploy no EasyPanel (projeto compose)
+# Segredos via env do painel; nada sensível aqui.
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
+      # IA da trilha
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      BRIDGE_URL: ${BRIDGE_URL}
+      BRIDGE_API_KEY: ${BRIDGE_API_KEY}
+      # diretório COMPARTILHADO com o aao-hermes-bridge (mesmo host/volume):
+      # a api grava uploads no workspace do tenant que o Hermes lê.
+      BRIDGE_SHARED_DATA_DIR: /shared/bridge-data
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-true}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-aao-files}
+      # URL da api ALCANÇÁVEL PELO CONTAINER DO BRIDGE (tools dos agentes)
+      INTERNAL_API_URL: ${INTERNAL_API_URL}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      # fila durável de processamento de reuniões do Teams
+      REDIS_URL: ${REDIS_URL}
+      # login hospedado das contas do bot de reunião (serviço "login" do
+      # aao-scribe): URL interna (rede do EasyPanel) e o WebSocket PÚBLICO que
+      # o navegador abre — use wss:// no domínio publicado do serviço login.
+      AAO_LOGIN_INTERNAL_URL: ${AAO_LOGIN_INTERNAL_URL:-http://aao-login:4000}
+      AAO_LOGIN_PUBLIC_WS_URL: ${AAO_LOGIN_PUBLIC_WS_URL}
+      # frontend (retorno do consentimento do Teams)
+      FRONTEND_URL: ${FRONTEND_URL}
+      # integração Microsoft Teams (app multi-tenant no Entra ID)
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET}
+      AZURE_REDIRECT_URI: ${AZURE_REDIRECT_URI}
+      TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL}
+      TEAMS_WEBHOOK_CLIENT_STATE: ${TEAMS_WEBHOOK_CLIENT_STATE}
+      PORT: "3000"
+    volumes:
+      # sessões de WhatsApp (credenciais!) — persistente
+      - api-data:/app/data
+      # mesmo bind nos dois composes (api e bridge)
+      - /var/lib/aao/bridge-data:/shared/bridge-data
+
+    networks:
+      default: {}
+      easypanel:
+        aliases:
+          - aao-api
+
+volumes:
+  api-data:
+
+# rede compartilhada do EasyPanel: dá DNS entre projetos (api <-> bridge)
+# e acesso do proxy de domínios. Alias fixo: "aao-api".
+networks:
+  easypanel:
+    external: true
