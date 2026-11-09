@@ -8,7 +8,7 @@ type DecryptedKey = ProviderKey & { apiKey: string };
 
 /** A chave do servidor não existe no banco; este é o id dela nas telas. */
 const SERVER_KEY_ID = 'servidor';
-const DEFAULT_MODEL = 'claude-sonnet-5-5';
+const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 @Injectable()
 export class ProviderKeysService {

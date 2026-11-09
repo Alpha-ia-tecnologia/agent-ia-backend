@@ -10,7 +10,7 @@ const DEFAULT_BASE_URLS: Partial<Record<Provider, string>> = {
 export const DEFAULT_MODELS: Partial<Record<Provider, string>> = {
   OPENAI: 'gpt-4o-mini',
   DEEPSEEK: 'deepseek-chat',
-  ANTHROPIC: 'claude-sonnet-5-5',
+  ANTHROPIC: 'claude-haiku-5-5',
   GOOGLE: 'gemini-2.0-flash',
 };
 

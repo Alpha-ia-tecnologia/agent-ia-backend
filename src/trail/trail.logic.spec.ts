@@ -9,6 +9,7 @@ import {
   parseTurn,
   tableQuorum,
   winningStation,
+  withoutQuestions,
 } from './trail.logic';
 
 describe('firstPending', () => {
@@ -100,6 +101,7 @@ describe('parseTurn', () => {
       options: ['A', 'B'],
       note: 'n',
       idea: 'i',
+      bridge: '',
     });
   });
 
@@ -179,5 +181,39 @@ describe('parsePlan', () => {
 
   it('recusa texto cortado', () => {
     expect(parsePlan('{"titulo": "Agenda')).toBeNull();
+  });
+});
+
+describe('parseTurn com transição', () => {
+  it('separa a transição da reação do Guia', () => {
+    const turn = parseTurn(
+      JSON.stringify({
+        resolvido: true,
+        mensagem: 'Reação',
+        opcoes: [],
+        nota: 'n',
+        ideia: '',
+        ponte: 'E agora?',
+      }),
+    );
+    expect(turn?.message).toBe('Reação');
+    expect(turn?.bridge).toBe('E agora?');
+  });
+
+  it('sem transição, devolve texto vazio', () => {
+    const turn = parseTurn(JSON.stringify({ mensagem: 'Resposta' }));
+    expect(turn?.bridge).toBe('');
+  });
+});
+
+describe('withoutQuestions', () => {
+  it('retira só as perguntas e mantém os parágrafos', () => {
+    expect(
+      withoutQuestions('Socorro respira. Quem confere?\n\nO caminho foi seu.'),
+    ).toBe('Socorro respira.\n\nO caminho foi seu.');
+  });
+
+  it('sem nada além da pergunta, fica vazio', () => {
+    expect(withoutQuestions('Quem confere o dado?')).toBe('');
   });
 });

@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  StreamableFile,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
@@ -116,6 +117,24 @@ export class TrailController {
   @Get('stations/:n/session')
   session(@CurrentUser() user: AuthUser, @Param('n', ParseIntPipe) n: number) {
     return this.trail.session(user, n);
+  }
+
+  @Get('stations/:n/document')
+  document(@CurrentUser() user: AuthUser, @Param('n', ParseIntPipe) n: number) {
+    return this.trail.stationDocument(user, n);
+  }
+
+  @Get('stations/:n/document/pdf')
+  async documentPdf(
+    @CurrentUser() user: AuthUser,
+    @Param('n', ParseIntPipe) n: number,
+  ): Promise<StreamableFile> {
+    const { file, name } = await this.trail.stationDocumentPdf(user, n);
+    return new StreamableFile(file, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${name}"`,
+      length: file.length,
+    });
   }
 
   @Post('stations/:n/attach')

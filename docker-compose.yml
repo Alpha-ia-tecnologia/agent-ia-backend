@@ -12,7 +12,7 @@ services:
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
       # IA da trilha
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-5-5}
       BRIDGE_URL: ${BRIDGE_URL}
       BRIDGE_API_KEY: ${BRIDGE_API_KEY}
       # diretório COMPARTILHADO com o aao-hermes-bridge (mesmo host/volume):

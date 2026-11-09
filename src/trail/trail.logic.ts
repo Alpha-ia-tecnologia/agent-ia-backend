@@ -75,6 +75,8 @@ export interface ParsedTurn {
   options: string[];
   note: string;
   idea: string;
+  /** transição para o próximo assunto, separada para o aprendizado entrar antes */
+  bridge: string;
 }
 
 const MAX_OPTIONS = 4;
@@ -99,6 +101,7 @@ export function parseTurn(raw: string): ParsedTurn | null {
         .slice(0, MAX_OPTIONS),
       note: text(data.nota),
       idea: text(data.ideia),
+      bridge: text(data.ponte),
     };
   } catch {
     return null;
@@ -188,4 +191,18 @@ export function parsePlan(raw: string): TrailPlanContent | null {
   } catch {
     return null;
   }
+}
+
+/** Na última fala da estação não há como responder: retira as perguntas. */
+export function withoutQuestions(text: string): string {
+  return text
+    .split(/\n\s*\n/)
+    .map((paragraph) =>
+      paragraph
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => !sentence.trim().endsWith('?'))
+        .join(' '),
+    )
+    .filter((paragraph) => paragraph.trim())
+    .join('\n\n');
 }

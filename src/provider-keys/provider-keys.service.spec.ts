@@ -28,12 +28,12 @@ describe('ProviderKeysService', () => {
     expect(key?.defaultModel).toBe('modelo-do-servidor');
   });
 
-  it('sem modelo definido, usa o Sonnet 5.5', async () => {
+  it('sem modelo definido, usa o Haiku 5.5', async () => {
     const service = setup({ ANTHROPIC_API_KEY: SECRET });
 
     const key = await service.findByProvider('c1', Provider.ANTHROPIC);
 
-    expect(key?.defaultModel).toBe('claude-sonnet-5-5');
+    expect(key?.defaultModel).toBe('claude-haiku-5-5');
   });
 
   it('a listagem não expõe nenhum trecho da chave', () => {

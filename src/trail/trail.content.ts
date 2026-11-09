@@ -28,6 +28,8 @@ export interface TrailStep {
   scripted?: boolean;
   /** fala do Guia quando um passo roteirizado encerra a etapa */
   closing?: string;
+  /** o que a pessoa leva deste passo; vira um cartão na conversa */
+  lesson?: { title: string; text: string };
   /** pede um documento antes de o especialista trabalhar */
   attach?: boolean;
   /** pergunta feita depois do resultado do especialista */
@@ -41,7 +43,9 @@ export interface TrailStage {
   question: string;
   challenge: string;
   care: string;
-  /** situação que abre a conversa da estação */
+  /** pessoa no centro da história da estação */
+  character: string;
+  /** história que abre a conversa da estação */
   scene: string;
   startPrompt: string;
   material: string;
@@ -292,6 +296,7 @@ export const LARGADA_STAGE: TrailStage = {
   question: 'Em qual secretaria ou órgão você trabalha?',
   challenge: 'Conhecer o Guia e começar a trilha.',
   care: 'Não escreva nomes de cidadãos nem dados sigilosos.',
+  character: '',
   scene: '',
   startPrompt: '',
   material: '',
@@ -318,7 +323,7 @@ export const LARGADA_STAGE: TrailStage = {
       done: 'A pessoa informou a área.',
       scripted: true,
       closing:
-        'Obrigado. São cinco estações, cada uma com um desafio real da Prefeitura. No final, você define 1 dor, 1 dado e 1 dono da sua área e recebe o seu plano de ação para os próximos 90 dias.',
+        'Obrigado. Vamos caminhar juntos por cinco estações, cada uma com uma história de São Luís e um desafio real da Prefeitura.\n\nNo final, você define 1 dor, 1 dado e 1 dono da sua área e sai daqui com o seu plano de ação para os próximos 90 dias.',
     },
   ],
 };
@@ -331,6 +336,7 @@ export const CHEGADA_STAGE: TrailStage = {
   challenge:
     'Definir 1 dor, 1 dado e 1 dono da própria área e transformar isso em um plano de 90 dias.',
   care: 'Não escreva nomes de cidadãos nem dados sigilosos.',
+  character: '',
   scene: '',
   startPrompt: '',
   material: '',
@@ -342,6 +348,10 @@ export const CHEGADA_STAGE: TrailStage = {
       key: 'dor',
       title: '1 dor',
       minutes: 1,
+      lesson: {
+        title: 'Uma dor por vez',
+        text: 'Um plano que tenta resolver tudo não começa. Escolher uma dor é o que torna a mudança possível.',
+      },
       ask: 'Qual é a sua dor: o problema que o cidadão sente na pele no seu serviço?',
       options: [],
       goal: 'Nomear um problema real que o cidadão sente.',
@@ -351,6 +361,10 @@ export const CHEGADA_STAGE: TrailStage = {
       key: 'dado',
       title: '1 dado',
       minutes: 1,
+      lesson: {
+        title: 'Comece com o que existe',
+        text: 'Uma planilha imperfeita que existe hoje vale mais que o sistema ideal que ainda não chegou.',
+      },
       ask: 'Qual planilha ou sistema mostra esse problema?',
       options: [
         'Uma planilha da equipe',
@@ -364,6 +378,10 @@ export const CHEGADA_STAGE: TrailStage = {
       key: 'dono',
       title: '1 dono',
       minutes: 1,
+      lesson: {
+        title: 'Todo plano precisa de um dono',
+        text: 'Sem alguém responsável por acompanhar o andamento, até a melhor ideia fica no papel.',
+      },
       ask: 'Quem poderia cuidar disso nos próximos 90 dias? Diga o cargo ou o setor, sem nome de pessoas.',
       options: ['Minha equipe', 'A coordenação da área', 'Ainda não sei'],
       goal: 'Indicar quem cuida do plano nos próximos 90 dias.',
@@ -381,8 +399,9 @@ export const TRAIL_STATIONS: TrailStage[] = [
     challenge:
       'Ler um edital com a IA e chegar ao checklist de requisitos, documentos e prazos.',
     care: 'Confira cada item no edital original. Nenhum número entra na proposta sem fonte.',
+    character: 'Socorro',
     scene:
-      'O Gabinete pediu uma posição: há editais abertos e a Prefeitura não pode perder o prazo.',
+      'Sexta-feira, fim de tarde, e o Gabinete pede uma posição até segunda: há editais abertos e a Prefeitura não pode perder o prazo. Socorro, da equipe de captação, olha para três editais na mesa e tem um medo: deixar passar um detalhe e perder o recurso.',
     startPrompt:
       'Você é analista de captação da Prefeitura de São Luís. Liste em tabela os requisitos, documentos e prazos deste edital. Marque o que não estiver claro.',
     material: 'Um edital público e a lista de projetos da Prefeitura',
@@ -413,7 +432,11 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'agenda',
         title: 'Agenda',
         minutes: 3,
-        ask: 'Qual etapa mais trava na sua área: achar o edital, montar a proposta ou prestar contas?',
+        lesson: {
+          title: 'Problema antes da ferramenta',
+          text: 'Antes de pensar em IA, diga quem sofre e o que precisa mudar. A tecnologia vem depois.',
+        },
+        ask: 'E na sua área, onde a correria aperta mais: achar o edital, montar a proposta ou prestar contas?',
         options: ['Achar o edital', 'Montar a proposta', 'Prestar contas'],
         goal: 'Ter o problema em uma frase e quem é afetado.',
         done: 'A pessoa disse o que trava e quem é afetado, mesmo de forma breve.',
@@ -422,19 +445,27 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'dados',
         title: 'Dados',
         minutes: 2,
-        ask: 'Que dado mostra esse problema? Um indicador possível é o de propostas enviadas por semestre.',
+        lesson: {
+          title: 'O indicador conta a história',
+          text: 'Um bom indicador é um número simples que mostra se o problema está melhorando.',
+        },
+        ask: 'Que dado mostra esse problema?',
         options: [
           'Propostas enviadas por semestre',
           'Prazos perdidos',
           'Ainda não medimos isso',
         ],
-        goal: 'Apontar um dado e um indicador que mostram o problema.',
+        goal: 'Apontar um dado e um indicador que mostram o problema. Se ajudar, sugira este indicador: propostas enviadas por semestre.',
         done: 'A pessoa citou um dado ou indicador, ou disse como passaria a medir.',
       },
       {
         key: 'solucao',
         title: 'Solução',
         minutes: 5,
+        lesson: {
+          title: 'As partes de um bom pedido',
+          text: 'Diga à IA quem ela é, o que fazer, para quem, em que formato e o que ela não pode fazer.',
+        },
         ask: 'Anexe o edital: eu leio e devolvo o checklist de requisitos, documentos e prazos.',
         options: [],
         goal: 'A IA lê o edital e devolve o checklist de requisitos, documentos e prazos. A pessoa avalia o resultado e aponta o que não está claro.',
@@ -447,6 +478,10 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'cuidados',
         title: 'Cuidados',
         minutes: 2,
+        lesson: {
+          title: 'A IA também erra com confiança',
+          text: 'Ela pode inventar um requisito ou um prazo com toda a segurança. Por isso, todo número volta à fonte.',
+        },
         ask: 'Antes de usar esse resultado, o que você confere no edital original?',
         options: ['Os prazos', 'Os valores', 'Os documentos exigidos'],
         goal: 'Conferir o resultado: nenhum número entra na proposta sem fonte.',
@@ -462,8 +497,9 @@ export const TRAIL_STATIONS: TrailStage[] = [
     challenge:
       'Reescrever um comunicado em linguagem simples e descrever a imagem em texto.',
     care: 'Valide com pessoas com deficiência e idosos antes de publicar.',
+    character: 'Seu Raimundo',
     scene:
-      'O comunicado de recadastramento gerou fila e ligações: muita gente não entendeu o que precisava fazer.',
+      'Seu Raimundo, 71 anos, morador do Anjo da Guarda, recebeu o comunicado de recadastramento. Leu duas vezes, não entendeu o que precisava fazer e pegou dois ônibus até o balcão. Na fila, descobriu que muita gente estava ali pelo mesmo motivo.',
     startPrompt:
       'Reescreva este comunicado da Prefeitura em linguagem simples, com frases curtas, sem perder prazos nem informações. Depois, descreva a imagem em texto.',
     material: 'Um comunicado, formulário ou página do site da Prefeitura',
@@ -482,7 +518,11 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'agenda',
         title: 'Agenda',
         minutes: 3,
-        ask: 'Qual serviço ou comunicado da sua área mais gera dúvida, e quem tem mais dificuldade de usá-lo?',
+        lesson: {
+          title: 'Quem fica de fora?',
+          text: 'Um serviço difícil falha primeiro para quem tem menos apoio. Comece por essa pessoa.',
+        },
+        ask: 'E no seu serviço, quem seria o Seu Raimundo? Qual comunicado ou serviço mais gera dúvida, e quem mais sofre para usá-lo?',
         options: [
           'Pessoas idosas',
           'Pessoas com deficiência',
@@ -495,19 +535,27 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'dados',
         title: 'Dados',
         minutes: 2,
-        ask: 'Que pedidos de ajuda mostram essa barreira? Um indicador possível é o tempo para concluir o serviço.',
+        lesson: {
+          title: 'Pedido de ajuda também é dado',
+          text: 'Cada ligação e cada dúvida no balcão mostram onde o serviço cria uma barreira.',
+        },
+        ask: 'Que pedidos de ajuda mostram essa barreira?',
         options: [
           'Ligações repetidas',
           'Filas no balcão',
           'Tempo para concluir o serviço',
         ],
-        goal: 'Apontar os pedidos de ajuda que mostram a barreira e um indicador.',
+        goal: 'Apontar os pedidos de ajuda que mostram a barreira e um indicador. Se ajudar, sugira este indicador: tempo para concluir o serviço.',
         done: 'A pessoa citou um sinal da barreira ou um indicador.',
       },
       {
         key: 'solucao',
         title: 'Solução',
         minutes: 5,
+        lesson: {
+          title: 'Linguagem simples é técnica',
+          text: 'Frases curtas, uma ideia por vez e a ação logo no início. Simplificar não é tirar informação.',
+        },
         ask: 'Anexe o comunicado: eu reescrevo em linguagem simples e descrevo a imagem em texto.',
         options: [],
         goal: 'A IA reescreve o comunicado em linguagem simples e descreve a imagem. Para Libras, a indicação é o VLibras. A pessoa avalia o resultado.',
@@ -519,6 +567,10 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'cuidados',
         title: 'Cuidados',
         minutes: 2,
+        lesson: {
+          title: 'Quem usa é quem valida',
+          text: 'A IA ajuda a escrever, mas quem diz se ficou claro são as pessoas idosas e com deficiência.',
+        },
         ask: 'Quem precisa validar esse texto antes de publicar?',
         options: [
           'Pessoas com deficiência',
@@ -538,8 +590,9 @@ export const TRAIL_STATIONS: TrailStage[] = [
     challenge:
       'Montar com a IA um assistente que explica o passo a passo com base nas regras oficiais.',
     care: 'A IA orienta, não concede licença. Toda regra precisa de fonte oficial.',
+    character: 'Dona Célia',
     scene:
-      'Quem abre um pequeno comércio em São Luís volta várias vezes ao balcão para conseguir o alvará.',
+      'Dona Célia decidiu abrir uma lanchonete no João Paulo. Já foi ao balcão três vezes por causa do alvará, e a cada ida descobre um papel diferente que faltava. Enquanto isso, o aluguel do ponto continua correndo.',
     startPrompt:
       'Você atende empreendedores na Prefeitura de São Luís. Só com as regras abaixo, explique em 5 passos como tirar o alvará. Se faltar algo, avise.',
     material: 'As dúvidas mais comuns do empreendedor e as regras do alvará',
@@ -558,7 +611,11 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'agenda',
         title: 'Agenda',
         minutes: 3,
-        ask: 'Em qual momento quem empreende mais sofre: abrir empresa, tirar alvará ou vender à Prefeitura?',
+        lesson: {
+          title: 'Siga o caminho de quem usa',
+          text: 'Percorra o serviço como o cidadão percorre. O problema costuma estar na passagem de uma etapa para outra.',
+        },
+        ask: 'Pensando em quem é como a Dona Célia, em qual momento quem empreende mais sofre: abrir a empresa, tirar o alvará ou vender à Prefeitura?',
         options: ['Abrir empresa', 'Tirar alvará', 'Vender à Prefeitura'],
         goal: 'Escolher um momento de quem empreende e dizer quem é afetado.',
         done: 'A pessoa escolheu um momento ou descreveu uma dificuldade de quem empreende.',
@@ -567,19 +624,27 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'dados',
         title: 'Dados',
         minutes: 2,
-        ask: 'Quais dúvidas mais chegam ao atendimento? Um indicador possível é o de dias para obter o alvará.',
+        lesson: {
+          title: 'Tempo de espera é custo',
+          text: 'Cada dia a mais para um alvará é dinheiro que quem empreende deixa de ganhar. Medir o tempo mostra isso.',
+        },
+        ask: 'Quais dúvidas mais chegam ao atendimento?',
         options: [
           'Quais documentos levar',
           'Quanto custa',
           'Quanto tempo demora',
         ],
-        goal: 'Apontar as dúvidas mais comuns e um indicador.',
+        goal: 'Apontar as dúvidas mais comuns e um indicador. Se ajudar, sugira este indicador: dias para obter o alvará.',
         done: 'A pessoa citou uma dúvida frequente ou um indicador.',
       },
       {
         key: 'solucao',
         title: 'Solução',
         minutes: 5,
+        lesson: {
+          title: 'IA com fonte responde melhor',
+          text: 'Quando a IA responde só com as regras que você entregou, ela inventa menos e avisa o que falta.',
+        },
         ask: 'Anexe as regras do alvará: eu monto o passo a passo com base nelas.',
         options: [],
         goal: 'A IA explica o passo a passo com base nas regras oficiais. A pessoa avalia se um empreendedor entenderia e o que falta nas regras.',
@@ -591,6 +656,10 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'cuidados',
         title: 'Cuidados',
         minutes: 2,
+        lesson: {
+          title: 'A IA orienta, o servidor responde',
+          text: 'Explicar o caminho pode ser automático. Conceder ou negar continua sendo ato de uma pessoa responsável.',
+        },
         ask: 'A IA orienta, mas não concede licença. Quem responde pela informação, e qual fonte oficial sustenta cada regra?',
         options: [],
         goal: 'Deixar claro que a IA orienta e não concede licença, e que toda regra precisa de fonte oficial.',
@@ -606,8 +675,9 @@ export const TRAIL_STATIONS: TrailStage[] = [
     challenge:
       'Montar um atendimento de WhatsApp com a IA, baseado na carta de serviços.',
     care: 'Avise que é uma IA, garanta a saída para um humano e não use dados pessoais.',
+    character: 'Luana',
     scene:
-      'A central de atendimento recebe todos os dias as mesmas perguntas, e o cidadão espera na linha.',
+      'Luana usou o intervalo do trabalho só para saber se o exame da mãe foi marcado. Ligou para a central e o intervalo acabou antes de alguém atender. Do outro lado da linha, uma atendente responde a mesma pergunta o dia inteiro.',
     startPrompt:
       'Você é o assistente da Prefeitura no WhatsApp. Responda só com base na carta de serviços abaixo, em até 3 frases. Fora dela, ofereça um atendente.',
     material:
@@ -627,7 +697,11 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'agenda',
         title: 'Agenda',
         minutes: 3,
-        ask: 'Qual atendimento da sua área tem fila, demora ou muitas ligações repetidas?',
+        lesson: {
+          title: 'Repetição é um sinal',
+          text: 'Quando a mesma pergunta volta todo dia, o problema não é de quem pergunta: é de como a informação chega.',
+        },
+        ask: 'E no seu serviço, qual atendimento tem fila, demora ou gente ligando de novo pelo mesmo motivo?',
         options: [],
         goal: 'Escolher um atendimento com fila, demora ou ligações repetidas.',
         done: 'A pessoa citou um atendimento com dificuldade.',
@@ -636,19 +710,27 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'dados',
         title: 'Dados',
         minutes: 2,
-        ask: 'Quais são as perguntas mais frequentes? Um indicador possível é o de casos resolvidos no primeiro contato.',
+        lesson: {
+          title: 'Resolver na primeira vez',
+          text: 'Casos resolvidos no primeiro contato mostram mais que velocidade: mostram se a pessoa saiu com a resposta.',
+        },
+        ask: 'Quais são as perguntas mais frequentes?',
         options: [
           'Segunda via de documentos',
           'Marcação de atendimento',
           'Prazo de um pedido',
         ],
-        goal: 'Apontar as perguntas mais frequentes e um indicador.',
+        goal: 'Apontar as perguntas mais frequentes e um indicador. Se ajudar, sugira este indicador: casos resolvidos no primeiro contato.',
         done: 'A pessoa citou uma pergunta frequente ou um indicador.',
       },
       {
         key: 'solucao',
         title: 'Solução',
         minutes: 5,
+        lesson: {
+          title: 'O limite é o que dá confiança',
+          text: 'Um bom assistente sabe o que não sabe: responde só com a base e chama um atendente para o resto.',
+        },
         ask: 'Anexe a carta de serviços: eu atendo pelo WhatsApp só com base nela.',
         options: [],
         goal: 'A IA faz o atendimento de WhatsApp com base na carta de serviços. Enquanto a pessoa escrever como cidadão, responda como o assistente, em até 3 frases, e pergunte se a resposta serviu.',
@@ -660,6 +742,10 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'cuidados',
         title: 'Cuidados',
         minutes: 2,
+        lesson: {
+          title: 'O cidadão precisa saber',
+          text: 'Avise que é uma IA e deixe sempre aberta a saída para falar com uma pessoa.',
+        },
         ask: 'Como o cidadão fica sabendo que fala com uma IA, e como chega a um atendente?',
         options: [],
         goal: 'Avisar que é uma IA, garantir saída para um humano e não usar dados pessoais.',
@@ -675,8 +761,9 @@ export const TRAIL_STATIONS: TrailStage[] = [
     challenge:
       'Organizar os chamados com a IA e chegar a um mapa de prioridades ou uma rota de vistoria.',
     care: 'A IA aponta prioridades; a fiscalização e a decisão continuam com a equipe.',
+    character: 'Marcos',
     scene:
-      'Os chamados ambientais se acumulam e a equipe de vistoria precisa decidir por onde começar.',
+      'Choveu forte em São Luís e os chamados se acumularam. Marcos, fiscal ambiental, tem uma pilha de ocorrências, uma equipe pequena e uma decisão para tomar logo cedo: por onde começar? Se errar a ordem, um ponto de descarte entope a galeria e a rua alaga de novo.',
     startPrompt:
       'Você é analista ambiental da Prefeitura. Agrupe os chamados desta planilha por bairro, aponte os 5 pontos mais recorrentes e sugira uma rota de vistoria.',
     material: 'Uma planilha de chamados ou ocorrências, sem dados pessoais',
@@ -695,7 +782,11 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'agenda',
         title: 'Agenda',
         minutes: 3,
-        ask: 'Qual problema ambiental pesa mais na sua região: descarte irregular, alagamento, coleta ou arborização?',
+        lesson: {
+          title: 'Use o que a cidade já tem',
+          text: 'Chamados, rotas e registros antigos já contam onde o problema se repete. Nem sempre é preciso criar dado novo.',
+        },
+        ask: 'Olhando para a sua região, o que pesa mais: descarte irregular, alagamento, coleta ou arborização?',
         options: ['Descarte irregular', 'Alagamento', 'Coleta', 'Arborização'],
         goal: 'Escolher um problema ambiental concreto e quem é afetado.',
         done: 'A pessoa escolheu um problema concreto.',
@@ -704,20 +795,28 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'dados',
         title: 'Dados',
         minutes: 2,
-        ask: 'Que dados existem sobre isso: chamados, chuva, rotas ou fotos? Um indicador possível é o de chamados atendidos no prazo.',
+        lesson: {
+          title: 'Dado bom não tem nome',
+          text: 'Para achar padrões, não é preciso saber quem reclamou. Tire nome, telefone e endereço de quem abriu o chamado.',
+        },
+        ask: 'Que dados existem sobre isso: chamados, chuva, rotas ou fotos?',
         options: [
           'Chamados',
           'Dados de chuva',
           'Rotas de coleta',
           'Fotos do local',
         ],
-        goal: 'Apontar os dados existentes e um indicador.',
+        goal: 'Apontar os dados existentes e um indicador. Se ajudar, sugira este indicador: chamados atendidos no prazo.',
         done: 'A pessoa citou um dado ou um indicador.',
       },
       {
         key: 'solucao',
         title: 'Solução',
         minutes: 5,
+        lesson: {
+          title: 'Enxergar padrões, definir prioridades',
+          text: 'A IA junta o que está espalhado e mostra o que se repete. É assim que uma pilha vira uma ordem de trabalho.',
+        },
         ask: 'Anexe a planilha de chamados: eu organizo os dados e proponho uma rota de vistoria.',
         options: [],
         goal: 'A IA organiza os dados e propõe um mapa de prioridades ou uma rota de vistoria. A pessoa avalia se faz sentido para quem conhece o território.',
@@ -729,6 +828,10 @@ export const TRAIL_STATIONS: TrailStage[] = [
         key: 'cuidados',
         title: 'Cuidados',
         minutes: 2,
+        lesson: {
+          title: 'Prioridade não é sentença',
+          text: 'A IA sugere por onde começar. Quem conhece o território confere e decide.',
+        },
         ask: 'A IA aponta prioridades. Quem decide a fiscalização, e o que a equipe confere antes de ir a campo?',
         options: [],
         goal: 'Deixar claro que a fiscalização e a decisão continuam com a equipe.',

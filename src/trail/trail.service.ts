@@ -15,6 +15,13 @@ import {
   type TrailAction,
 } from './trail-activity.service';
 import { TrailAgentsService } from './trail-agents.service';
+import {
+  pickResult,
+  renderStationPdf,
+  stationPdfName,
+  withoutLabel,
+  type TrailStationDocument,
+} from './trail-document';
 import { TrailAiService, type ConversationInput } from './trail-ai.service';
 import {
   ORCHESTRATOR_SLUG,
@@ -40,10 +47,11 @@ import {
   TOTAL_STATIONS,
   winningStation,
   type PilotCandidate,
+  withoutQuestions,
 } from './trail.logic';
 
 /** Mensagens enviadas à IA em cada volta do chat. */
-const HISTORY_WINDOW = 12;
+const HISTORY_WINDOW = 16;
 const MESSAGES_SHOWN = 60;
 const MURAL_NOTES = 40;
 const HIGHLIGHTS = 8;
@@ -55,6 +63,7 @@ const PILOT_STALE_MS = 150_000;
 const PLAN_STALE_MS = 600_000;
 const SHEET_WRITE_ATTEMPTS = 5;
 const IDEA_STEP = 'ideia';
+const TABLE_VOICES = 4;
 
 const isUniqueViolation = (err: unknown) =>
   err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
@@ -383,11 +392,17 @@ Com 1 dor, 1 dado e 1 dono da sua área, monto o seu plano de ação para os pr�
 
 ${first.ask}`;
     }
-    return `${who}, chegamos à Estação ${stage.number} de ${TOTAL_STATIONS}: ${stage.title}.
+    const lead =
+      stage.number === 1
+        ? `${who}, vamos à primeira estação. Quero começar com uma história.`
+        : `${who}, a sua ideia da estação anterior já está no mural da mesa. Agora, outra história.`;
+    return `${lead}
 
-${stage.scene} **${stage.question}**
+${stage.scene}
 
-Passo 1, ${first.title}. ${first.ask}`;
+**${stage.question}** É o que vamos descobrir juntos.
+
+${first.ask}`;
   }
 
   /** Abre a conversa da pessoa nesta estação na primeira visita. */
@@ -431,7 +446,7 @@ Passo 1, ${first.title}. ${first.ask}`;
 
   private say(
     sessionId: string,
-    role: 'assistant' | 'user' | 'event',
+    role: 'assistant' | 'user' | 'event' | 'lesson',
     authorName: string,
     content: string,
   ) {
@@ -479,24 +494,19 @@ Passo 1, ${first.title}. ${first.ask}`;
     const stage = this.stage(stationNumber);
     const run = await this.openRun(user, stationNumber);
     const session = await this.ensureSession(run, stage, user);
-    const [rows, idea] = await Promise.all([
+    const [rows, notes] = await Promise.all([
       this.prisma.trailMessage.findMany({
         where: { sessionId: session.id },
         orderBy: { createdAt: 'desc' },
         take: MESSAGES_SHOWN,
       }),
-      this.prisma.trailNote.findUnique({
-        where: {
-          runId_userId_station_step: {
-            runId: run.id,
-            userId: user.userId,
-            station: stationNumber,
-            step: IDEA_STEP,
-          },
-        },
-        select: { text: true },
+      this.prisma.trailNote.findMany({
+        where: { runId: run.id, userId: user.userId, station: stationNumber },
+        select: { step: true, text: true },
       }),
     ]);
+    const noteOf = (step: string) =>
+      notes.find((n) => n.step === step)?.text ?? null;
     const document = stage.documents.find((d) => d.id === session.documentId);
     const finished = session.phase === 'done';
     return {
@@ -536,7 +546,15 @@ Passo 1, ${first.title}. ${first.ask}`;
       options: session.options as unknown as string[],
       busy: this.activity.busy(session.id),
       completed: !!session.completedAt,
-      idea: idea?.text ?? null,
+      idea: noteOf(IDEA_STEP),
+      recap:
+        finished && stage.number !== LARGADA
+          ? stage.steps.map((s) => ({
+              title: s.title,
+              note: noteOf(s.key),
+              lesson: s.lesson?.title ?? null,
+            }))
+          : [],
       table: this.tableProgress(run, stationNumber),
       messages: rows.reverse().map((m) => ({
         id: m.id,
@@ -545,6 +563,64 @@ Passo 1, ${first.title}. ${first.ask}`;
         content: m.content,
       })),
     };
+  }
+
+  /** Documento da estação concluída, montado sem nova chamada à IA. */
+  async stationDocument(
+    user: AuthUser,
+    stationNumber: number,
+  ): Promise<TrailStationDocument> {
+    const pending = 'O documento fica disponível ao concluir a estação.';
+    if (!isStation(stationNumber)) throw new NotFoundException(pending);
+    const stage = this.stage(stationNumber);
+    const run = await this.openRun(user, stationNumber);
+    const session = await this.prisma.trailSession.findUnique({
+      where: {
+        runId_userId_station: {
+          runId: run.id,
+          userId: user.userId,
+          station: stationNumber,
+        },
+      },
+    });
+    if (!session?.completedAt) throw new NotFoundException(pending);
+    const [notes, spoken, agents] = await Promise.all([
+      this.prisma.trailNote.findMany({
+        where: { runId: run.id, userId: user.userId, station: stationNumber },
+        select: { step: true, text: true },
+      }),
+      this.prisma.trailMessage.findMany({
+        where: { sessionId: session.id, role: 'assistant' },
+        select: { authorName: true, content: true },
+      }),
+      this.agents.load(user.companyId),
+    ]);
+    const member = this.member(run, user.userId);
+    return {
+      station: stage.number,
+      title: stage.title,
+      question: stage.question,
+      care: stage.care,
+      name: member.name,
+      department: member.department,
+      tableName: run.name,
+      completedAt: session.completedAt.toISOString(),
+      material:
+        stage.documents.find((d) => d.id === session.documentId)?.title ?? null,
+      steps: stage.steps.flatMap((s) => {
+        const note = notes.find((n) => n.step === s.key)?.text;
+        return note
+          ? [{ title: s.title, note: withoutLabel(note, s.title) }]
+          : [];
+      }),
+      result: pickResult(spoken, agents.orchestrator.name),
+      lessons: stage.steps.flatMap((s) => (s.lesson ? [s.lesson] : [])),
+    };
+  }
+
+  async stationDocumentPdf(user: AuthUser, stationNumber: number) {
+    const data = await this.stationDocument(user, stationNumber);
+    return { file: await renderStationPdf(data), name: stationPdfName(data) };
   }
 
   /** Quem da mesa está em cada ponto, e o que já foi anotado. */
@@ -620,7 +696,11 @@ Passo 1, ${first.title}. ${first.ask}`;
         session.id,
         'assistant',
         agents.specialistFor(stationNumber).name,
-        `Recebi o documento, ${firstName(member.name)}. Neste passo trabalho com você. Deixei abaixo o prompt de partida da estação: ajuste o que quiser e envie.`,
+        `Recebi, ${firstName(member.name)}. Sou o ${agents.specialistFor(stationNumber).name}, e o Guia me chamou para esta parte.
+
+Deixei um pedido pronto no campo abaixo. Repare que ele diz quem a IA deve ser, o que fazer e como entregar.
+
+Mude o que quiser e envie para ver o que acontece.`,
       );
     }
     return this.session(user, stationNumber);
@@ -750,17 +830,39 @@ Passo 1, ${first.title}. ${first.ask}`;
         orderBy: { createdAt: 'desc' },
         take: HISTORY_WINDOW - 1,
       });
-      const ideas =
-        stationNumber === CHEGADA
-          ? await this.prisma.trailNote.findMany({
-              where: { runId: run.id, userId: user.userId, step: IDEA_STEP },
-              orderBy: { station: 'asc' },
-              select: { text: true },
-            })
-          : [];
+      const [ideas, voices] = await Promise.all([
+        this.prisma.trailNote.findMany({
+          where: {
+            runId: run.id,
+            userId: user.userId,
+            step: IDEA_STEP,
+            station: { not: stationNumber },
+          },
+          orderBy: { station: 'asc' },
+          select: { text: true },
+        }),
+        this.prisma.trailNote.findMany({
+          where: {
+            runId: run.id,
+            station: stationNumber,
+            userId: { not: user.userId },
+            step: { not: IDEA_STEP },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: TABLE_VOICES,
+          select: { authorName: true, department: true, text: true },
+        }),
+      ]);
       const input: ConversationInput = {
         stage,
-        person: { ...member, ideas: ideas.map((i) => i.text) },
+        person: {
+          ...member,
+          ideas: ideas.map((i) => i.text),
+          tableVoices: voices.map(
+            (v) =>
+              `${firstName(v.authorName)}${v.department ? ` (${v.department})` : ''}: ${v.text}`,
+          ),
+        },
         tableName: run.name,
         document:
           stage.documents.find((d) => d.id === session.documentId) ?? null,
@@ -791,7 +893,24 @@ Passo 1, ${first.title}. ${first.ask}`;
       return this.session(user, stationNumber);
     }
 
-    await this.say(session.id, 'assistant', result.agentName, result.message);
+    const advanced = result.counted && (result.resolved || lastAttempt);
+    // na última fala da estação não há como responder
+    const finishing = advanced && !stage.steps[session.stepIndex + 1];
+    const closing = finishing ? withoutQuestions : (text: string) => text;
+    await this.say(
+      session.id,
+      'assistant',
+      result.agentName,
+      closing(result.message),
+    );
+    // o aprendizado entra entre a reação do Guia e a transição para o próximo assunto
+    if (advanced && step.lesson) {
+      await this.say(session.id, 'lesson', step.lesson.title, step.lesson.text);
+    }
+    const bridge = closing(result.bridge);
+    if (bridge) {
+      await this.say(session.id, 'assistant', result.agentName, bridge);
+    }
     if (!result.counted) {
       await this.prisma.trailSession.update({
         where: { id: session.id },
