@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { OnboardingStatus, UserRole } from '@prisma/client';
 import { AuthService, type OrgSummary } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrgDto } from './orgs.dto';
@@ -23,6 +23,8 @@ export class OrgsService {
           name: dto.name.trim(),
           businessDescription: dto.businessDescription,
           industry: dto.industry,
+          // os agentes da trilha já vêm prontos, sem o onboarding por IA
+          onboardingStatus: OnboardingStatus.COMPLETED,
         },
       });
       await tx.membership.create({

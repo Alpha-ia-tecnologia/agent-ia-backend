@@ -112,7 +112,7 @@ model TrailEvent {
   companyId    String   @id
   company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   releasedUpTo Int      @default(0)
-  /// entrada só com o nome: no máximo uma organização aberta por vez
+  /// sem uso: a entrada só com o nome fica sempre aberta
   entryOpen    Boolean  @default(false)
   /// o organizador abriu a escolha do piloto para todas as mesas
   pilotOpen    Boolean  @default(false)

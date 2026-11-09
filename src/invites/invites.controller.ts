@@ -65,11 +65,6 @@ class EnterWithCodeDto {
   name: string;
 }
 
-class EventEntryDto {
-  @IsBoolean()
-  open: boolean;
-}
-
 /** Convites da organização ativa (dono e admins). */
 @Controller('org/invites')
 @Roles(UserRole.OWNER, UserRole.ADMIN)
@@ -84,18 +79,6 @@ export class OrgInvitesController {
   @Get()
   list(@CurrentUser() user: AuthUser) {
     return this.invites.list(user.companyId);
-  }
-
-  /** Entrada só com o nome, controlada pelo telão. */
-  @Get('evento')
-  eventEntry(@CurrentUser() user: AuthUser) {
-    return this.invites.eventEntry(user.companyId);
-  }
-
-  @Post('evento')
-  @HttpCode(200)
-  setEventEntry(@CurrentUser() user: AuthUser, @Body() dto: EventEntryDto) {
-    return this.invites.setEventEntry(user.companyId, user.userId, dto.open);
   }
 
   @Delete(':id')

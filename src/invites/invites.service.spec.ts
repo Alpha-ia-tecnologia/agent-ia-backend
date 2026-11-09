@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  GoneException,
-  NotFoundException,
-} from '@nestjs/common';
+import { GoneException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import type { AuthService } from '../auth/auth.service';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -34,13 +30,16 @@ function setup(found: ReturnType<typeof invite> | null) {
     orgInvite: {
       findUnique: jest.fn().mockResolvedValue(found),
       findFirst: jest
-        .fn<Promise<unknown>, [{ where: { companyId: string } }]>()
+        .fn<Promise<unknown>, [{ where: Record<string, unknown> }]>()
         .mockResolvedValue(found),
     },
-    trailEvent: {
-      findFirst: jest.fn().mockResolvedValue({ companyId: 'c1' }),
-      findUnique: jest.fn().mockResolvedValue({ entryOpen: true }),
-      upsert: jest.fn().mockResolvedValue({}),
+    company: {
+      findFirst: jest
+        .fn<Promise<unknown>, [{ orderBy: unknown }]>()
+        .mockResolvedValue({ id: 'c1' }),
+    },
+    membership: {
+      findFirst: jest.fn().mockResolvedValue({ userId: 'dono' }),
     },
     user: {
       create: jest
@@ -62,20 +61,48 @@ function setup(found: ReturnType<typeof invite> | null) {
 }
 
 describe('InvitesService.enterEvent', () => {
-  it('entra só com o nome, na organização que abriu a entrada', async () => {
+  it('entra só com o nome, na organização mais antiga', async () => {
     const { prisma, service, accept, assignRoom } = setup(invite());
 
     await expect(service.enterEvent('Ana')).resolves.toBe(session);
 
-    const query = prisma.orgInvite.findFirst.mock.calls[0][0];
-    expect(query.where.companyId).toBe('c1');
+    expect(prisma.company.findFirst.mock.calls[0][0].orderBy).toEqual({
+      createdAt: 'asc',
+    });
     expect(accept).toHaveBeenCalledWith('ABCD2345', 'u1');
     expect(assignRoom).toHaveBeenCalledWith('u1', 'c1');
   });
 
-  it('com a entrada encerrada, não cria conta', async () => {
+  it('usa um convite sem validade, que não vence durante o evento', async () => {
     const { prisma, service } = setup(invite());
-    prisma.trailEvent.findFirst.mockResolvedValue(null);
+
+    await service.enterEvent('Ana');
+
+    const { where } = prisma.orgInvite.findFirst.mock.calls[0][0];
+    expect(where).toMatchObject({
+      companyId: 'c1',
+      revokedAt: null,
+      expiresAt: null,
+      maxUses: 1000,
+    });
+  });
+
+  it('sem convite permanente, cria um em nome do dono e entra', async () => {
+    const { prisma, service, accept } = setup(invite());
+    prisma.orgInvite.findFirst.mockResolvedValue(null);
+    const create = jest
+      .spyOn(service, 'create')
+      .mockResolvedValue({ code: 'WXYZ-2345' } as never);
+
+    await expect(service.enterEvent('Ana')).resolves.toBe(session);
+
+    expect(create).toHaveBeenCalledWith('c1', 'dono', { maxUses: 1000 });
+    expect(accept).toHaveBeenCalledWith('WXYZ-2345', 'u1');
+  });
+
+  it('sem organização criada, não cria conta', async () => {
+    const { prisma, service } = setup(invite());
+    prisma.company.findFirst.mockResolvedValue(null);
 
     await expect(service.enterEvent('Ana')).rejects.toBeInstanceOf(
       GoneException,
@@ -83,65 +110,11 @@ describe('InvitesService.enterEvent', () => {
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
-  it('sem convite ativo, a entrada está fechada e não cria conta', async () => {
-    const { prisma, service } = setup(null);
-
-    await expect(service.enterEvent('Ana')).rejects.toBeInstanceOf(
-      GoneException,
-    );
-    expect(prisma.user.create).not.toHaveBeenCalled();
-  });
-
-  it('vagas esgotadas aparecem como entrada fechada', async () => {
+  it('vagas esgotadas avisam o limite de participantes', async () => {
     const { service } = setup(invite({ maxUses: 2, uses: 2 }));
 
     await expect(service.enterEvent('Ana')).rejects.toThrow(
-      'A entrada não está aberta no momento',
-    );
-  });
-});
-
-describe('InvitesService.setEventEntry', () => {
-  it('abrir cria o convite do evento e marca a organização', async () => {
-    const { prisma, service } = setup(invite());
-    prisma.trailEvent.findFirst.mockResolvedValue(null);
-    const create = jest.spyOn(service, 'create').mockResolvedValue({} as never);
-
-    await expect(service.setEventEntry('c1', 'u9', true)).resolves.toEqual({
-      open: true,
-    });
-
-    expect(create).toHaveBeenCalledWith(
-      'c1',
-      'u9',
-      expect.objectContaining({ maxUses: 300 }),
-    );
-    expect(prisma.trailEvent.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: { entryOpen: true } }),
-    );
-  });
-
-  it('não abre se outra organização já recebe os participantes', async () => {
-    const { prisma, service } = setup(invite());
-    prisma.trailEvent.findFirst.mockResolvedValue({ companyId: 'outra' });
-
-    await expect(
-      service.setEventEntry('c1', 'u9', true),
-    ).rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.trailEvent.upsert).not.toHaveBeenCalled();
-  });
-
-  it('encerrar só fecha a entrada', async () => {
-    const { prisma, service } = setup(invite());
-    const create = jest.spyOn(service, 'create');
-
-    await expect(service.setEventEntry('c1', 'u9', false)).resolves.toEqual({
-      open: false,
-    });
-
-    expect(create).not.toHaveBeenCalled();
-    expect(prisma.trailEvent.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: { entryOpen: false } }),
+      'O limite de participantes foi atingido',
     );
   });
 });

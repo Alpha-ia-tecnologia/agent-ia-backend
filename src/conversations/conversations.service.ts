@@ -84,7 +84,7 @@ export function isProviderFailureText(text: string): boolean {
 export function friendlyChatError(raw: string | undefined): string {
   const text = raw ?? '';
   if (/No LLM provider configured|Nenhum provedor de IA/i.test(text)) {
-    return 'Nenhum provedor de IA está configurado para esta organização. Um administrador precisa conectar um em Configurações → Provedores.';
+    return 'Nenhum provedor de IA está configurado no servidor. Avise o organizador.';
   }
   if (/não respondeu a tempo|timed? ?out|timeout/i.test(text)) {
     return 'O agente demorou demais para responder. Tente de novo.';
@@ -100,7 +100,7 @@ export function friendlyChatError(raw: string | undefined): string {
     return 'O provedor de IA está sobrecarregado ou sem créditos agora. Tente de novo em instantes.';
   }
   if (/\b401\b|\b403\b|invalid.*(api.?key|token)|authentication/i.test(text)) {
-    return 'A chave do provedor de IA foi recusada. Um administrador precisa revisá-la em Configurações → Provedores.';
+    return 'A chave de IA do servidor foi recusada. Avise o organizador.';
   }
   return 'Não foi possível gerar a resposta. Tente de novo.';
 }
@@ -2127,7 +2127,7 @@ Como trabalhar com a equipe:
     keyRecord = keyRecord ?? (await this.providerKeys.getDecrypted(companyId));
     if (!keyRecord) {
       throw new BadRequestException(
-        'Nenhum provedor de IA configurado. Vá em Configurações → Provedores e conecte uma assinatura ou cadastre uma chave de API.',
+        'Nenhum provedor de IA configurado. Confira a variável ANTHROPIC_API_KEY no servidor.',
       );
     }
 

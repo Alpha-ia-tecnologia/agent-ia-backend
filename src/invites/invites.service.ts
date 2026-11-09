@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   GoneException,
   Injectable,
   Logger,
@@ -21,10 +20,15 @@ import {
 const isUniqueViolation = (err: unknown) =>
   err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
 
-const ENTRY_CLOSED =
-  'A entrada não está aberta no momento. Fale com o organizador.';
-/** Teto de pessoas: a entrada não tem código, e cada uma consome a IA. */
-const EVENT_MAX_ENTRIES = 300;
+const ENTRY_UNAVAILABLE =
+  'A entrada ainda não está disponível. Fale com o organizador.';
+const ENTRY_FULL =
+  'O limite de participantes foi atingido. Fale com o organizador.';
+/**
+ * Teto de pessoas: a entrada não tem código nem pode ser fechada, e cada uma
+ * consome a IA. Folga sobre o público de 300, porque entrar de novo conta.
+ */
+const EVENT_MAX_ENTRIES = 1000;
 
 /** Não é um hash bcrypt válido: a conta de convidado nunca loga por senha. */
 export const GUEST_PASSWORD_HASH = 'convidado-sem-senha';
@@ -218,69 +222,49 @@ export class InvitesService {
   }
 
   /**
-   * Entrada do evento só com o nome. Os participantes vão para a organização
-   * que abriu a entrada pelo telão; com ela fechada, ninguém novo entra.
+   * Entrada do evento só com o nome, sempre aberta. Os participantes vão para
+   * a organização mais antiga, a do evento: uma conta criada depois não
+   * consegue desviar a entrada.
    */
   async enterEvent(name: string) {
-    const event = await this.prisma.trailEvent.findFirst({
-      where: { entryOpen: true },
-      select: { companyId: true },
-    });
-    const invite = event
-      ? await this.prisma.orgInvite.findFirst({
-          where: {
-            companyId: event.companyId,
-            revokedAt: null,
-            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-          },
-          orderBy: { createdAt: 'desc' },
-          select: { code: true },
-        })
-      : null;
-    if (!invite) throw new GoneException(ENTRY_CLOSED);
+    const code = await this.eventInviteCode();
+    if (!code) throw new GoneException(ENTRY_UNAVAILABLE);
     try {
-      return await this.enter(invite.code, name);
+      return await this.enter(code, name);
     } catch (err) {
-      if (err instanceof GoneException) throw new GoneException(ENTRY_CLOSED);
+      if (err instanceof GoneException) throw new GoneException(ENTRY_FULL);
       throw err;
     }
   }
 
-  async eventEntry(companyId: string) {
-    const event = await this.prisma.trailEvent.findUnique({
-      where: { companyId },
-      select: { entryOpen: true },
+  /** Convite permanente da entrada; se não existir ou for cancelado, cria outro. */
+  private async eventInviteCode() {
+    const company = await this.prisma.company.findFirst({
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
     });
-    return { open: !!event?.entryOpen };
-  }
-
-  /**
-   * Abre ou encerra a entrada só com o nome. Só uma organização pode estar
-   * aberta: quem abre primeiro recebe os participantes, então uma conta criada
-   * depois não consegue desviar a entrada do evento.
-   */
-  async setEventEntry(companyId: string, userId: string, open: boolean) {
-    if (open) {
-      const other = await this.prisma.trailEvent.findFirst({
-        where: { entryOpen: true, companyId: { not: companyId } },
-        select: { companyId: true },
-      });
-      if (other) {
-        throw new ConflictException(
-          'Outra organização já está com a entrada aberta.',
-        );
-      }
-      await this.create(companyId, userId, {
-        expiresInHours: 12,
+    if (!company) return null;
+    const invite = await this.prisma.orgInvite.findFirst({
+      where: {
+        companyId: company.id,
+        revokedAt: null,
+        expiresAt: null,
         maxUses: EVENT_MAX_ENTRIES,
-      });
-    }
-    await this.prisma.trailEvent.upsert({
-      where: { companyId },
-      create: { companyId, entryOpen: open },
-      update: { entryOpen: open },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { code: true },
     });
-    return { open };
+    if (invite) return invite.code;
+    const owner = await this.prisma.membership.findFirst({
+      where: { companyId: company.id, role: UserRole.OWNER },
+      orderBy: { createdAt: 'asc' },
+      select: { userId: true },
+    });
+    if (!owner) return null;
+    const created = await this.create(company.id, owner.userId, {
+      maxUses: EVENT_MAX_ENTRIES,
+    });
+    return created.code;
   }
 
   private async usable(rawCode: string) {
