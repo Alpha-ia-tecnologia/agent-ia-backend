@@ -31,6 +31,7 @@ function setup(initial: Room[] = []) {
       ),
     },
     trailRun: {
+      update: jest.fn().mockResolvedValue({}),
       findFirst: jest.fn(() =>
         Promise.resolve(
           [...rooms]
@@ -73,7 +74,7 @@ function setup(initial: Room[] = []) {
     } as unknown as TrailAgentsService,
     new TrailActivityService(),
   );
-  return { service, rooms, members };
+  return { service, rooms, members, prisma };
 }
 
 describe('TrailService.assignRoom', () => {
@@ -107,6 +108,28 @@ describe('TrailService.assignRoom', () => {
     expect(members.size).toBe(50);
     expect(rooms.every((r) => r.memberCount <= MAX_ROOM_SIZE)).toBe(true);
     expect(rooms.reduce((sum, r) => sum + r.memberCount, 0)).toBe(50);
+  });
+
+  it('acomoda 300 pessoas entrando ao mesmo tempo, sem recusar ninguém', async () => {
+    const { service, rooms, members } = setup();
+
+    await Promise.all(
+      Array.from({ length: 300 }, (_, i) => service.assignRoom(`u${i}`, 'c1')),
+    );
+
+    expect(members.size).toBe(300);
+    expect(rooms).toHaveLength(Math.ceil(300 / MAX_ROOM_SIZE));
+    expect(rooms.every((r) => r.memberCount <= MAX_ROOM_SIZE)).toBe(true);
+  });
+
+  it('uma falha na reserva não trava quem vem depois', async () => {
+    const { service, members, prisma } = setup();
+    prisma.trailMember.create.mockRejectedValueOnce(new Error('banco'));
+
+    await expect(service.assignRoom('u1', 'c1')).rejects.toThrow('banco');
+    await service.assignRoom('u2', 'c1');
+
+    expect(members.get('u2')).toBe('r1');
   });
 
   it('quem já tem sala não ocupa outro lugar', async () => {

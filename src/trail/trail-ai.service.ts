@@ -31,8 +31,14 @@ import {
 } from './trail.logic';
 
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
-/** Com 50 celulares, o excesso espera a vez em vez de esbarrar no limite da conta. */
-const DEFAULT_CONCURRENCY = 20;
+/** Com 300 celulares, o excesso espera a vez em vez de esbarrar no limite da conta. */
+const DEFAULT_CONCURRENCY = 80;
+/**
+ * Cada plano gera cerca de 3.300 tokens em 24 s: com 40 ao mesmo tempo, a saída
+ * fica abaixo dos 400 mil tokens por minuto da conta, e os turnos da conversa
+ * não esperam atrás deles.
+ */
+const DEFAULT_PLAN_CONCURRENCY = 40;
 
 const AI_UNAVAILABLE =
   'A IA não respondeu agora. Tente de novo em instantes ou chame o facilitador.';
@@ -180,6 +186,8 @@ interface CallOptions {
   effort: 'low' | 'medium';
   maxTokens?: number;
   schema?: Record<string, unknown>;
+  /** fila própria para chamadas longas */
+  gate?: Gate;
 }
 
 interface ApiKey {
@@ -219,6 +227,7 @@ export class TrailAiService {
   private readonly logger = new Logger(TrailAiService.name);
   private readonly model: string;
   private readonly gate: Gate;
+  private readonly planGate: Gate;
   private readonly clients = new Map<string, Anthropic>();
 
   constructor(
@@ -230,6 +239,10 @@ export class TrailAiService {
       this.config.get<string>('ANTHROPIC_MODEL')?.trim() || DEFAULT_MODEL;
     const limit = Number(this.config.get('ANTHROPIC_MAX_CONCURRENCY'));
     this.gate = new Gate(limit > 0 ? limit : DEFAULT_CONCURRENCY);
+    const planLimit = Number(this.config.get('ANTHROPIC_PLAN_CONCURRENCY'));
+    this.planGate = new Gate(
+      planLimit > 0 ? planLimit : DEFAULT_PLAN_CONCURRENCY,
+    );
   }
 
   /** Chave do .env do servidor; tem prioridade sobre a de Configurações. */
@@ -272,7 +285,8 @@ export class TrailAiService {
   }
 
   private async call(key: ApiKey, options: CallOptions): Promise<string> {
-    const response = await this.gate.run(() =>
+    const gate = options.gate ?? this.gate;
+    const response = await gate.run(() =>
       this.client(key).beta.messages.create({
         model: this.model,
         max_tokens: options.maxTokens ?? 16_000,
@@ -725,6 +739,7 @@ ${s.notes.map((n) => `- ${n}`).join('\n')}`,
 ${GOLDEN_RULES}`,
         effort: 'medium',
         schema: PLAN_SCHEMA,
+        gate: this.planGate,
         messages: [
           {
             role: 'user',

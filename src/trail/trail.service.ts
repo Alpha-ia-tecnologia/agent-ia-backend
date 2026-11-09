@@ -51,8 +51,8 @@ const HIGHLIGHTS = 8;
 const ROOM_ATTEMPTS = 20;
 /** Sem resposta da IA por este tempo, outra pessoa pode gerar de novo. */
 const PILOT_STALE_MS = 150_000;
-/** O plano é maior e pode esperar na fila quando todos pedem juntos. */
-const PLAN_STALE_MS = 240_000;
+/** Com 300 pessoas pedindo juntas, o último plano espera cerca de 3 minutos. */
+const PLAN_STALE_MS = 600_000;
 const SHEET_WRITE_ATTEMPTS = 5;
 const IDEA_STEP = 'ideia';
 
@@ -89,6 +89,7 @@ type EventFlags = { releasedUpTo: number; chegadaOpen: boolean } | null;
 export class TrailService {
   private readonly logger = new Logger(TrailService.name);
   private lastMessageAt = 0;
+  private readonly seatQueue = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -289,7 +290,7 @@ export class TrailService {
    * reservado no próprio UPDATE: quem entra junto na última vaga não passa
    * do limite, porque o segundo não casa mais com a condição.
    */
-  async assignRoom(userId: string, companyId: string): Promise<void> {
+  private async reserveSeat(userId: string, companyId: string): Promise<void> {
     await this.agents.ensure(companyId);
     const memberKey = { userId_companyId: { userId, companyId } };
     if (await this.prisma.trailMember.findUnique({ where: memberKey })) return;
@@ -327,6 +328,21 @@ export class TrailService {
     throw new ServiceUnavailableException(
       'Não foi possível reservar um lugar agora. Tente de novo.',
     );
+  }
+
+  /**
+   * Uma reserva por vez em cada organização: com centenas de pessoas entrando
+   * juntas, ninguém fica disputando a mesma vaga até esgotar as tentativas.
+   */
+  assignRoom(userId: string, companyId: string): Promise<void> {
+    const previous = this.seatQueue.get(companyId) ?? Promise.resolve();
+    const task = () => this.reserveSeat(userId, companyId);
+    const current = previous.then(task, task);
+    this.seatQueue.set(
+      companyId,
+      current.catch(() => undefined),
+    );
+    return current;
   }
 
   private async openNextRoom(companyId: string) {
